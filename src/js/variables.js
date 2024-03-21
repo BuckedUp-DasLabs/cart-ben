@@ -1,11 +1,28 @@
-const storefrontAccessToken = "3f0fe03b9adb374eee07d99b57da77bd";
-const fetchUrl = `https://secure.buckedup.com/api/2021-07/graphql.json`;
-const apiOptions = {
-  method: "POST",
-  headers: {
-    "Content-Type": "application/json",
-    "X-Shopify-Storefront-Access-Token": storefrontAccessToken,
-  },
+const fetchUrl = `https://ar5vgv5qw5.execute-api.us-east-1.amazonaws.com/list/`;
+const postUrl = `https://ar5vgv5qw5.execute-api.us-east-1.amazonaws.com/upsell/${urlParams.get("order_uuid")}`
+const finishUrl = `https://ar5vgv5qw5.execute-api.us-east-1.amazonaws.com/upsell/${urlParams.get("order_uuid")}/finish`
+const postApi = async (url, body) => {
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+    const responseLog = await response.json();
+    if (response.status == 500 || response.status == 400) window.location.href = "https://buckedup.com";
+    if (!response.ok) {
+      throw new Error("Api post error.");
+    }
+    return responseLog;
+  } catch (error) {
+    console.error(error);
+    return false;
+  }
 };
 
-export { apiOptions, fetchUrl }
+export default postApi;
+
+
+export { fetchUrl, postUrl, finishUrl, postApi }

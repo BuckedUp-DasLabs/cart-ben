@@ -1,131 +1,76 @@
-import { apiOptions, fetchUrl } from "../../variables.js";
+import { fetchUrl } from "../../variables.js";
 
-const filterVariants = (data, ids, isOrderBump) => {
-  const containsNumber = (str) => /\d/.test(str);
-  const getVariants = (id) => {
-    const idStart = "gid://shopify/ProductVariant/";
-    const idsArray = typeof id == "string" ? id.split("-") : false;
-    const properties = { isWhole: idsArray && idsArray.includes("whole"), oneCard: idsArray && idsArray.includes("oneCard") };
-    if (idsArray && containsNumber(id.split("-")[1])) {
-      const filteredIds = [];
-      for (let i = 0; i < idsArray.length && containsNumber(idsArray[i]); i++) {
-        filteredIds.push(idStart + idsArray[i]);
-      }
-      return { ids: filteredIds, ...properties };
-    }
-    return { ids: null, ...properties };
-  };
-
-  const isNotAvailable = (variant) => variant.node.availableForSale === false;
-  const isAvailable = (variant) => variant.node.availableForSale === true;
-
-  const addCustomTitle = (id) => {
-    if ("title" in orderBumpIds[id]) {
-      data.find((prod) => prod.id.includes(id)).title = orderBumpIds[id].title;
-    }
-  };
-
-  const setIsOrderBump = (id) => {
-    if (isOrderBump) {
-      const prod = data.find((prod) => prod.id.includes(id));
-      prod.id = prod.id + "ob";
-      addCustomTitle(id);
-    }
-  };
-
-  ids.forEach((id) => {
-    setIsOrderBump(id);
-    const variants = getVariants(id);
-    const hasQtty = id in orderBumpIds && orderBumpIds[id].hasQtty;
-    if (variants.ids || variants.isWhole || variants.oneCard || hasQtty) {
-      const prod = data.find((prod) => prod.id.includes(id.split("-")[0]));
-      if (hasQtty) prod.hasQtty = hasQtty;
-      if (variants.oneCard) prod.oneCard = true;
-      if (variants.ids) prod.variants.edges = prod.variants.edges.filter((filteredVariant) => variants.ids.includes(filteredVariant.node.id));
-      if (variants.isWhole) {
-        prod.availableForSale = prod.variants.edges.every(isAvailable);
-        prod.isWhole = true;
-      } else if (variants.ids) prod.availableForSale = !prod.variants.edges.every(isNotAvailable);
-    }
-  });
-};
-
-const fetchProduct = async ({ ids, isOrderBump = false }) => {
-  const query = `
-  { 
-    nodes(ids: [${ids.map((id) => `"gid://shopify/Product/${id}"`)}]) {
-      ... on Product {
-        availableForSale
-        title
-        id
-        options{
-          ... on ProductOption{
-            id
-            name
-            values
-          }
+const handleLoad = async ({ ids, country }) => {
+  const data = { data: [], noStock: false, error: false };
+  const handleStock = () => {
+    data.data.forEach((product) => {
+      if (product.options.length === 0) {
+        if (product.stock["[]"] <= 0) {
+          console.warn("Out of stock: ", product.id);
+          data.noStock = true;
         }
-        variants(first: 100) {
-          edges{
-            node{
-              id
-              title
-              availableForSale
-              selectedOptions{
-                name
-                value
-              }
-              price{
-                amount
-              }
-              image {
-                ... on Image {
-                  src
-                }
-              }
+        return;
+      }
+      const isNormalProduct = Object.hasOwn(product.options[0].values[0], "in_stock");
+      if (!isNormalProduct) {
+        if (Object.values(product.stock).every((val) => val <= 0)) {
+          console.warn("Out of stock: ", product.id);
+          data.noStock = true;
+          return;
+        }
+        const mainOption = product.options[0];
+        const secondaryOption = product.options[1];
+        for (let mainValue of mainOption.values) {
+          let hasStock = false;
+          for (let secondValue of secondaryOption.values) {
+            if (
+              (product.stock[`[${mainValue.id},${secondValue.id}]`] !== undefined && product.stock[`[${mainValue.id},${secondValue.id}]`] > 0) ||
+              (product.stock[`[${secondValue.id},${mainValue.id}]`] !== undefined && product.stock[`[${secondValue.id},${mainValue.id}]`] > 0)
+            ) {
+              hasStock = true;
             }
           }
+          if (!hasStock) mainOption.values = mainOption.values.filter((value) => value.id !== mainValue.id);
         }
+        return;
       }
-    }
-  }
-  `;
-  try {
-    const response = await fetch(fetchUrl, {
-      ...apiOptions,
-      body: JSON.stringify({ query: query }),
-    });
-    let data = await response.json();
-    if (!response.ok || data.data.nodes.some((prod) => prod === null)) {
-      console.warn(data);
-      throw new Error("Error Fetching Api.");
-    }
-    data = data.data.nodes;
-    filterVariants(data, ids, isOrderBump);
-
-    data.forEach((prod) => {
-      if (!prod.availableForSale) console.warn("Out of stock: ", prod.id, prod.title);
-      prod.id = prod.id.split("/").slice(-1)[0];
-
-      prod.variants = prod.variants.edges.filter((edge) => edge.node.availableForSale);
-      let minPrice = 99999;
-      for (let key in prod.variants) {
-        prod.variants[key] = prod.variants[key].node;
-        prod.variants[key].title = prod.variants[key].title.split("(")[0];
-        if (+prod.variants[key].price.amount < minPrice) minPrice = prod.variants[key].price.amount;
-      }
-      for (let key in prod.variants) {
-        if (+prod.variants[key].price.amount > minPrice) {
-          const string = ` (+$${(prod.variants[key].price.amount - minPrice).toFixed(2)})`;
-          prod.variants[key].title = prod.variants[key].title + string;
+      for (let option of product.options) {
+        if (!option.values.length == 0) {
+          option.values = option.values.filter((value) => value.in_stock);
+          if (option.values.length <= 0) {
+            console.warn("Out of stock: ", product.id);
+            data.noStock = true;
+          }
         }
       }
     });
-    return data;
-  } catch (error) {
-    alert("Product not found.");
-    return Promise.reject(error);
-  }
+  };
+
+  const fetchEveryProduct = (ids) => {
+    const fetchApi = async (id) => {
+      let url = `${fetchUrl}${id}`;
+      if (country) url = url + `?country=${country}`;
+      try {
+        const response = await fetch(url);
+        if (response.status === 404) throw new Error("Product Not Found.");
+        if (response.status == 500 || response.status == 400) throw new Error("Sorry, there was a problem.");
+        const apiData = await response.json();
+        // if (typeof id === "string"){
+        //   if(id.includes("oneCard")) apiData.product.oneCard = true;
+        //   if(id.includes("whole")) apiData.product.isWhole = true;
+        // }
+        data.data.push(apiData.product);
+      } catch (error) {
+        data.error = { hasError: true, message: error.message };
+        if (error.message === "Sorry, there was a problem.") data.error["redirect"] = true;
+      }
+    };
+
+    return Promise.all(ids.map((id) => fetchApi(id)));
+  };
+  await fetchEveryProduct(ids);
+  handleStock();
+  return data;
 };
 
-export default fetchProduct;
+export default handleLoad;

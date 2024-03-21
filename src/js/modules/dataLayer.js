@@ -38,6 +38,13 @@ const dataLayerStart = (data) => {
   }, 200);
 };
 
+const dataLayerNoThanks = (data) => {
+  const titles = data.map((items) => items.name);
+  const item = { event: "interaction", action: "click", value: 0 };
+  setDataLayer(item);
+  setKlaviyo("User Refused", item, titles);
+};
+
 const dataLayerRedirect = (data) => {
   const titles = data.map((items) => items.title);
   const item = { event: "offerview", action: "viewaction", value: 0 };
@@ -45,4 +52,12 @@ const dataLayerRedirect = (data) => {
   setKlaviyo("User Redirect Engagement", item, titles);
 };
 
-export { dataLayerStart, dataLayerRedirect };
+const dataLayerBuy = (data, price) => {
+  const titles = data.map((items) => items.name);
+  const currentCurrency = data[0].price.match(/([A-Za-z]+)? ?\$(\d+\.\d+)/)[1] || "USD";
+  const item = { event: "interaction", action: "purchase", value: price.toFixed(2), currency: currentCurrency };
+  setDataLayer(item);
+  setKlaviyo("User Bought", item, titles);
+};
+
+export { dataLayerStart, dataLayerRedirect, dataLayerBuy, dataLayerNoThanks };
